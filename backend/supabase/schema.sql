@@ -116,7 +116,18 @@ CREATE TABLE IF NOT EXISTS packages (
     duration_days INTEGER NOT NULL
 );
 
--- 10. Enable Row Level Security (RLS)
+-- 10. Business Analytics Table
+CREATE TABLE IF NOT EXISTS business_analytics (
+  business_id UUID REFERENCES businesses(id) ON DELETE CASCADE PRIMARY KEY,
+  views INTEGER DEFAULT 0,
+  contacts INTEGER DEFAULT 0,
+  bookmarks INTEGER DEFAULT 0,
+  review_count INTEGER DEFAULT 0,
+  avg_rating DECIMAL(3, 2) DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 11. Enable Row Level Security (RLS)
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE businesses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tourist_activity ENABLE ROW LEVEL SECURITY;
@@ -124,8 +135,9 @@ ALTER TABLE business_media ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reviews ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bookmarks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tourism_locations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE business_analytics ENABLE ROW LEVEL SECURITY;
 
--- 11. Policies
+-- 12. Policies
 DO $$ BEGIN
     -- Profiles
     DROP POLICY IF EXISTS "Public profiles viewable" ON profiles;
@@ -143,6 +155,11 @@ DO $$ BEGIN
     -- Tourism Locations
     DROP POLICY IF EXISTS "Tourism locations are viewable by everyone" ON tourism_locations;
     CREATE POLICY "Tourism locations are viewable by everyone" ON tourism_locations FOR SELECT USING (true);
+
+    -- Analytics
+    DROP POLICY IF EXISTS "Admins can view all analytics" ON business_analytics;
+    CREATE POLICY "Admins can view all analytics" ON business_analytics FOR SELECT 
+      USING ((SELECT role FROM profiles WHERE id = auth.uid()) = 'admin' OR business_id IN (SELECT id FROM businesses WHERE user_id = auth.uid()));
 END $$;
 
 -- 12. Updated At Trigger
@@ -153,6 +170,21 @@ BEGIN
     RETURN NEW;
 END;
 $$ language 'plpgsql';
+
+-- 13. Auto Create Analytics Record
+CREATE OR REPLACE FUNCTION create_business_analytics_record()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO business_analytics (business_id) VALUES (NEW.id);
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+DROP TRIGGER IF EXISTS trg_create_analytics_on_business ON businesses;
+CREATE TRIGGER trg_create_analytics_on_business
+AFTER INSERT ON businesses
+FOR EACH ROW
+EXECUTE FUNCTION create_business_analytics_record();
 
 DROP TRIGGER IF EXISTS update_profiles_updated_at ON profiles;
 CREATE TRIGGER update_profiles_updated_at BEFORE UPDATE ON profiles FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
