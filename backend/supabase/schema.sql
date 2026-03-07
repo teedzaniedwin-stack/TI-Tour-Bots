@@ -27,10 +27,28 @@ CREATE TABLE businesses (
     description TEXT,
     location_district TEXT NOT NULL,
     location_place TEXT NOT NULL,
-    phone TEXT,
+    phone_whatsapp TEXT,
+    phone_office TEXT,
     email TEXT,
+    website TEXT,
     image_url TEXT,
+    certificate_url TEXT,
+    payment_proof_url TEXT,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+    rejection_reason TEXT,
+    package_type TEXT DEFAULT 'basic' CHECK (package_type IN ('basic', 'standard', 'premium')),
+    price_range TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Business Media (Photos/Videos)
+CREATE TABLE business_media (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    business_id UUID REFERENCES businesses(id) ON DELETE CASCADE,
+    media_url TEXT NOT NULL,
+    media_type TEXT CHECK (media_type IN ('image', 'video')),
+    subheading TEXT,
+    file_size_mb DECIMAL(5, 2),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 

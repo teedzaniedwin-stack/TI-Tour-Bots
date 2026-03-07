@@ -35,6 +35,30 @@ export const BUSINESS_CATEGORIES = [
   "Tour Guide",
 ];
 
+export const PACKAGES = [
+  { 
+    id: 'basic', 
+    name: 'Basic', 
+    price: 0, 
+    features: ['Business Listing', '1 Profile Photo', 'Contact Info'],
+    limits: { photos: 1, videos: 0, videoSize: 0 }
+  },
+  { 
+    id: 'standard', 
+    name: 'Standard', 
+    price: 1500, 
+    features: ['Featured Listing', 'Up to 5 Photos', '1 Video (2.5MB)', 'Priority Support'],
+    limits: { photos: 5, videos: 1, videoSize: 2.5 }
+  },
+  { 
+    id: 'premium', 
+    name: 'Premium', 
+    price: 3500, 
+    features: ['Top of Search', 'Up to 15 Photos', '3 Videos (4MB)', 'Analytics Dashboard', 'Verified Badge'],
+    limits: { photos: 15, videos: 3, videoSize: 4.0 }
+  }
+];
+
 export const COUNTRIES = [
   { name: "Botswana", code: "BW", continent: "Africa" },
   { name: "South Africa", code: "ZA", continent: "Africa" },
