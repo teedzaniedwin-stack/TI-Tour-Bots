@@ -52,7 +52,7 @@ import {
   PACKAGES
 } from './lib/constants';
 
-import { supabase } from './lib/supabase';
+import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { cn } from './lib/utils';
 import { supabaseService } from './services/supabaseService';
 import { UserRole, Business, BusinessMedia, PackageType, BusinessStatus, UserProfile } from './types';
@@ -1660,6 +1660,8 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!isSupabaseConfigured) return;
+
     // Check session
     const checkSession = async () => {
       try {
@@ -1693,6 +1695,30 @@ export default function App() {
     await supabaseService.signOut();
     setUser(null);
   };
+
+  if (!isSupabaseConfigured) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-gray-50">
+        <div className="max-w-md w-full bg-white p-8 rounded-3xl shadow-xl border border-gray-100 text-center">
+          <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-6">
+            <X className="w-8 h-8" />
+          </div>
+          <h1 className="text-2xl font-bold mb-4">Configuration Required</h1>
+          <p className="text-gray-600 mb-8 leading-relaxed">
+            Supabase environment variables are missing. Please add <strong>VITE_SUPABASE_URL</strong> and <strong>VITE_SUPABASE_ANON_KEY</strong> to your environment secrets to continue.
+          </p>
+          <div className="space-y-4">
+            <div className="p-4 bg-gray-50 rounded-xl text-left text-sm font-mono break-all">
+              VITE_SUPABASE_URL=https://your-project.supabase.co
+            </div>
+            <div className="p-4 bg-gray-50 rounded-xl text-left text-sm font-mono break-all">
+              VITE_SUPABASE_ANON_KEY=your-anon-key
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
