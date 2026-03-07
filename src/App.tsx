@@ -52,55 +52,14 @@ import {
   PACKAGES
 } from './lib/constants';
 
-// --- Utility ---
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
-
-// --- Types ---
-type UserRole = 'tourist' | 'business' | 'admin';
-type BusinessStatus = 'pending' | 'approved' | 'rejected';
-type PackageType = 'basic' | 'standard' | 'premium';
-
-interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: UserRole;
-}
-
-interface Business {
-  id: string;
-  user_id: string;
-  business_name: string;
-  category: string;
-  description: string;
-  location_district: string;
-  location_place: string;
-  phone_whatsapp: string;
-  phone_office: string;
-  email: string;
-  website?: string;
-  status: BusinessStatus;
-  package_type: PackageType;
-  price_range?: string;
-  image_url: string;
-  certificate_url?: string;
-  payment_proof_url?: string;
-  rejection_reason?: string;
-}
-
-interface BusinessMedia {
-  id: string;
-  business_id: string;
-  media_url: string;
-  media_type: 'image' | 'video';
-  subheading?: string;
-}
+import { supabase } from './lib/supabase';
+import { cn } from './lib/utils';
+import { supabaseService } from './services/supabaseService';
+import { UserRole, Business, BusinessMedia, PackageType, BusinessStatus, UserProfile } from './types';
 
 // --- Components ---
 
-const Navbar = ({ user, onLogout }: { user: User | null; onLogout: () => void }) => {
+const Navbar = ({ user, onLogout }: { user: UserProfile | null; onLogout: () => void }) => {
   const [isOpen, setIsOpen] = useState(false);
   const navigate = useNavigate();
 
@@ -330,21 +289,29 @@ const Home = () => {
   );
 };
 
-const Login = ({ onLogin }: { onLogin: (role: UserRole) => void }) => {
+const Login = () => {
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Mock logic: email determines role
-    let role: UserRole = 'tourist';
-    if (email.includes('admin')) role = 'admin';
-    else if (email.includes('business')) role = 'business';
-    
-    onLogin(role);
-    if (role === 'admin') navigate('/admin');
-    else if (role === 'business') navigate('/business');
-    else navigate('/pwa');
+    setError('');
+    setLoading(true);
+    try {
+      const user = await supabaseService.signIn(email, password);
+      const profile = await supabaseService.getProfile(user.id);
+      
+      if (profile.role === 'admin') navigate('/admin');
+      else if (profile.role === 'business') navigate('/business');
+      else navigate('/pwa');
+    } catch (err: any) {
+      setError(err.message || 'Failed to sign in');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -354,6 +321,11 @@ const Login = ({ onLogin }: { onLogin: (role: UserRole) => void }) => {
           <h1 className="text-3xl font-bold mb-2">Welcome Back</h1>
           <p className="text-gray-500">Sign in to your tourism account</p>
         </div>
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-xl text-sm font-medium">
+            {error}
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label className="block text-sm font-semibold mb-2">Email Address</label>
@@ -373,10 +345,15 @@ const Login = ({ onLogin }: { onLogin: (role: UserRole) => void }) => {
               required
               className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-black outline-none transition-all"
               placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
             />
           </div>
-          <button className="w-full bg-black text-white py-4 rounded-xl font-bold hover:bg-gray-800 transition-all shadow-lg">
-            Sign In
+          <button 
+            disabled={loading}
+            className="w-full bg-black text-white py-4 rounded-xl font-bold hover:bg-gray-800 transition-all shadow-lg disabled:opacity-50"
+          >
+            {loading ? 'Signing In...' : 'Sign In'}
           </button>
         </form>
         <div className="mt-8 text-center text-sm text-gray-500">
@@ -396,11 +373,33 @@ const Login = ({ onLogin }: { onLogin: (role: UserRole) => void }) => {
 const Signup = () => {
   const [role, setRole] = useState<UserRole>('tourist');
   const [step, setStep] = useState(1);
-  const [district, setDistrict] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [isSuccess, setIsSuccess] = useState(false);
+
+  // Form State
+  const [formData, setFormData] = useState({
+    fullName: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+    businessName: '',
+    category: BUSINESS_CATEGORIES[0],
+    whatsapp: '',
+    office: '',
+    website: '',
+    district: '',
+    place: '',
+    country: '',
+  });
+
   const [selectedPackage, setSelectedPackage] = useState('basic');
   const [files, setFiles] = useState<{cert?: File, payment?: File}>({});
 
-  const [isSuccess, setIsSuccess] = useState(false);
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'cert' | 'payment') => {
     if (e.target.files?.[0]) {
@@ -408,9 +407,88 @@ const Signup = () => {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleTouristSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSuccess(true);
+    setError('');
+    setLoading(true);
+
+    try {
+      const country = COUNTRIES.find(c => c.code === formData.country);
+      await supabaseService.signUp(
+        formData.email,
+        formData.password,
+        formData.fullName,
+        'tourist',
+        {
+          country_code: formData.country,
+          continent: country?.continent || 'Unknown'
+        }
+      );
+      setIsSuccess(true);
+    } catch (err: any) {
+      setError(err.message || 'Signup failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBusinessSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      if (formData.password !== formData.confirmPassword) {
+        throw new Error('Passwords do not match');
+      }
+
+      // 1. Create Auth User & Profile
+      const user = await supabaseService.signUp(
+        formData.email,
+        formData.password,
+        formData.fullName,
+        'business'
+      );
+
+      // 2. Upload Certificate
+      let certUrl = '';
+      if (files.cert) {
+        const fileExt = files.cert.name.split('.').pop();
+        const fileName = `${user.id}/certificate_${Math.random()}.${fileExt}`;
+        certUrl = await supabaseService.uploadFile('business-docs', fileName, files.cert);
+      }
+
+      // 3. Upload Payment Proof
+      let paymentUrl = '';
+      if (files.payment) {
+        const fileExt = files.payment.name.split('.').pop();
+        const fileName = `${user.id}/payment_${Math.random()}.${fileExt}`;
+        paymentUrl = await supabaseService.uploadFile('payments', fileName, files.payment);
+      }
+
+      // 4. Create Business Record
+      await supabaseService.createBusiness({
+        user_id: user.id,
+        business_name: formData.businessName,
+        category: formData.category,
+        email: formData.email,
+        phone_whatsapp: formData.whatsapp,
+        phone_office: formData.office,
+        website: formData.website,
+        location_district: formData.district,
+        location_place: formData.place,
+        package_type: selectedPackage as PackageType,
+        certificate_url: certUrl,
+        payment_proof_url: paymentUrl,
+        status: 'pending'
+      });
+
+      setIsSuccess(true);
+    } catch (err: any) {
+      setError(err.message || 'Onboarding failed');
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (isSuccess) {
@@ -448,6 +526,12 @@ const Signup = () => {
           </p>
         </div>
 
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-xl text-sm font-medium">
+            {error}
+          </div>
+        )}
+
         {step === 1 && (
           <div className="flex p-1 bg-gray-100 rounded-xl mb-10">
             {(['tourist', 'business'] as const).map((r) => (
@@ -465,30 +549,69 @@ const Signup = () => {
           </div>
         )}
 
-        <form className="space-y-6">
+        <div className="space-y-6">
           {role === 'tourist' ? (
-            <div className="space-y-6">
+            <form onSubmit={handleTouristSignup} className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="block text-sm font-semibold mb-2">Full Name</label>
-                  <input type="text" className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" placeholder="John Doe" />
+                  <input 
+                    name="fullName"
+                    type="text" 
+                    required
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" 
+                    placeholder="John Doe" 
+                    value={formData.fullName}
+                    onChange={handleInputChange}
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-semibold mb-2">Email</label>
-                  <input type="email" className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" placeholder="john@example.com" />
+                  <input 
+                    name="email"
+                    type="email" 
+                    required
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" 
+                    placeholder="john@example.com" 
+                    value={formData.email}
+                    onChange={handleInputChange}
+                  />
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-semibold mb-2">Country of Origin</label>
-                <select className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none appearance-none bg-white">
-                  <option value="">Select Country</option>
-                  {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
-                </select>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-semibold mb-2">Password</label>
+                  <input 
+                    name="password"
+                    type="password" 
+                    required
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" 
+                    placeholder="••••••••" 
+                    value={formData.password}
+                    onChange={handleInputChange}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold mb-2">Country of Origin</label>
+                  <select 
+                    name="country"
+                    required
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none appearance-none bg-white"
+                    value={formData.country}
+                    onChange={handleInputChange}
+                  >
+                    <option value="">Select Country</option>
+                    {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                  </select>
+                </div>
               </div>
-              <button className="w-full bg-black text-white py-4 rounded-xl font-bold hover:bg-gray-800 transition-all shadow-lg">
-                Create Tourist Account
+              <button 
+                disabled={loading}
+                className="w-full bg-black text-white py-4 rounded-xl font-bold hover:bg-gray-800 transition-all shadow-lg disabled:opacity-50"
+              >
+                {loading ? 'Creating Account...' : 'Create Tourist Account'}
               </button>
-            </div>
+            </form>
           ) : (
             <div className="space-y-8">
               {step === 1 && (
@@ -496,31 +619,115 @@ const Signup = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <label className="block text-sm font-semibold mb-2">Business Name</label>
-                      <input type="text" className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" placeholder="Safari Lodge Ltd" />
+                      <input 
+                        name="businessName"
+                        type="text" 
+                        required
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" 
+                        placeholder="Safari Lodge Ltd" 
+                        value={formData.businessName}
+                        onChange={handleInputChange}
+                      />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold mb-2">Category</label>
-                      <select className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none bg-white">
+                      <select 
+                        name="category"
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none bg-white"
+                        value={formData.category}
+                        onChange={handleInputChange}
+                      >
                         {BUSINESS_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
                     </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
+                      <label className="block text-sm font-semibold mb-2">Business Email</label>
+                      <input 
+                        name="email"
+                        type="email" 
+                        required
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" 
+                        placeholder="info@safari.com" 
+                        value={formData.email}
+                        onChange={handleInputChange}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold mb-2">Full Name (Owner)</label>
+                      <input 
+                        name="fullName"
+                        type="text" 
+                        required
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" 
+                        placeholder="Jane Smith" 
+                        value={formData.fullName}
+                        onChange={handleInputChange}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-sm font-semibold mb-2">Password</label>
+                      <input 
+                        name="password"
+                        type="password" 
+                        required
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" 
+                        placeholder="••••••••" 
+                        value={formData.password}
+                        onChange={handleInputChange}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold mb-2">Confirm Password</label>
+                      <input 
+                        name="confirmPassword"
+                        type="password" 
+                        required
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" 
+                        placeholder="••••••••" 
+                        value={formData.confirmPassword}
+                        onChange={handleInputChange}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
                       <label className="block text-sm font-semibold mb-2">WhatsApp Number</label>
-                      <input type="text" className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" placeholder="+267 ..." />
+                      <input 
+                        name="whatsapp"
+                        type="text" 
+                        required
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" 
+                        placeholder="+267 ..." 
+                        value={formData.whatsapp}
+                        onChange={handleInputChange}
+                      />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold mb-2">Office Number</label>
-                      <input type="text" className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" placeholder="+267 ..." />
+                      <input 
+                        name="office"
+                        type="text" 
+                        required
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" 
+                        placeholder="+267 ..." 
+                        value={formData.office}
+                        onChange={handleInputChange}
+                      />
                     </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <label className="block text-sm font-semibold mb-2">District</label>
                       <select 
+                        name="district"
+                        required
                         className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none bg-white"
-                        onChange={(e) => setDistrict(e.target.value)}
+                        value={formData.district}
+                        onChange={handleInputChange}
                       >
                         <option value="">Select District</option>
                         {BOTSWANA_DISTRICTS.map(d => <option key={d} value={d}>{d}</option>)}
@@ -528,9 +735,15 @@ const Signup = () => {
                     </div>
                     <div>
                       <label className="block text-sm font-semibold mb-2">Place</label>
-                      <select className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none bg-white">
+                      <select 
+                        name="place"
+                        required
+                        className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none bg-white"
+                        value={formData.place}
+                        onChange={handleInputChange}
+                      >
                         <option value="">Select Place</option>
-                        {district && DISTRICT_PLACES[district]?.map(p => <option key={p} value={p}>{p}</option>)}
+                        {formData.district && DISTRICT_PLACES[formData.district]?.map(p => <option key={p} value={p}>{p}</option>)}
                       </select>
                     </div>
                   </div>
@@ -593,13 +806,20 @@ const Signup = () => {
                   </div>
                   <div className="flex gap-4">
                     <button type="button" onClick={() => setStep(2)} className="flex-1 py-4 rounded-xl font-bold border border-gray-200">Back</button>
-                    <button type="submit" onClick={handleSubmit} className="flex-1 bg-black text-white py-4 rounded-xl font-bold">Submit for Approval</button>
+                    <button 
+                      type="button" 
+                      onClick={handleBusinessSignup} 
+                      disabled={loading}
+                      className="flex-1 bg-black text-white py-4 rounded-xl font-bold disabled:opacity-50"
+                    >
+                      {loading ? 'Submitting...' : 'Submit for Approval'}
+                    </button>
                   </div>
                 </div>
               )}
             </div>
           )}
-        </form>
+        </div>
       </div>
     </div>
   );
@@ -610,28 +830,71 @@ const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState<'analytics' | 'approvals'>('analytics');
   const [rejectionModal, setRejectionModal] = useState<{ isOpen: boolean, businessId: string | null }>({ isOpen: false, businessId: null });
   const [rejectionReason, setRejectionReason] = useState('');
-  
-  const data = [
-    { name: 'Africa', value: 400 },
-    { name: 'Europe', value: 300 },
-    { name: 'N. America', value: 200 },
-    { name: 'Asia', value: 100 },
-  ];
+  const [pendingBusinesses, setPendingBusinesses] = useState<Business[]>([]);
+  const [analytics, setAnalytics] = useState<{ continents: any[], districts: any[] }>({ continents: [], districts: [] });
+  const [loading, setLoading] = useState(true);
 
-  const districtData = [
-    { name: 'Chobe', value: 30 },
-    { name: 'North-West', value: 45 },
-    { name: 'Central', value: 20 },
-    { name: 'South-East', value: 15 },
-  ];
+  useEffect(() => {
+    fetchData();
+  }, [activeTab]);
 
-  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
-
-  const handleReject = () => {
-    console.log(`Rejected ${rejectionModal.businessId} for: ${rejectionReason}`);
-    setRejectionModal({ isOpen: false, businessId: null });
-    setRejectionReason('');
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      if (activeTab === 'approvals') {
+        const data = await supabaseService.getBusinesses({ status: 'pending' });
+        setPendingBusinesses(data);
+      } else {
+        const data = await supabaseService.getAdminAnalytics();
+        setAnalytics(data);
+      }
+    } catch (error) {
+      console.error('Admin fetch error:', error);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const handleApprove = async (id: string) => {
+    try {
+      await supabaseService.updateBusiness(id, { status: 'approved' });
+      setPendingBusinesses(prev => prev.filter(b => b.id !== id));
+    } catch (error) {
+      alert('Failed to approve business');
+    }
+  };
+
+  const handleReject = async () => {
+    if (!rejectionModal.businessId || !rejectionReason) return;
+    try {
+      await supabaseService.updateBusiness(rejectionModal.businessId, { 
+        status: 'rejected',
+        rejection_reason: rejectionReason
+      });
+      setPendingBusinesses(prev => prev.filter(b => b.id !== rejectionModal.businessId));
+      setRejectionModal({ isOpen: false, businessId: null });
+      setRejectionReason('');
+    } catch (error) {
+      alert('Failed to reject business');
+    }
+  };
+
+  // Process analytics data for charts
+  const continentChartData = Object.entries(
+    analytics.continents.reduce((acc: any, curr: any) => {
+      acc[curr.visitor_continent] = (acc[curr.visitor_continent] || 0) + 1;
+      return acc;
+    }, {})
+  ).map(([name, value]) => ({ name, value }));
+
+  const districtChartData = Object.entries(
+    analytics.districts.reduce((acc: any, curr: any) => {
+      acc[curr.location_district] = (acc[curr.location_district] || 0) + 1;
+      return acc;
+    }, {})
+  ).map(([name, value]) => ({ name, value }));
+
+  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-10 space-y-10">
@@ -720,34 +983,34 @@ const AdminDashboard = () => {
             ))}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-gray-100">
-              <h3 className="text-xl font-bold mb-6">Visitor by Continent</h3>
-              <div className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={data} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={5} dataKey="value">
-                      {data.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-gray-100">
+                <h3 className="text-xl font-bold mb-6">Visitor by Continent</h3>
+                <div className="h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={continentChartData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={5} dataKey="value">
+                        {continentChartData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-gray-100">
+                <h3 className="text-xl font-bold mb-6">Businesses by District</h3>
+                <div className="h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={districtChartData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={5} dataKey="value">
+                        {districtChartData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[(index + 2) % COLORS.length]} />)}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
             </div>
-            <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-gray-100">
-              <h3 className="text-xl font-bold mb-6">Businesses by District</h3>
-              <div className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={districtData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={5} dataKey="value">
-                      {districtData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[(index + 2) % COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          </div>
         </div>
       ) : (
         <div className="bg-white rounded-[2rem] shadow-sm border border-gray-100 overflow-hidden">
@@ -761,29 +1024,35 @@ const AdminDashboard = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {[
-                { name: 'Kalahari Sands', pkg: 'Premium', cert: true, pay: true },
-                { name: 'Delta Aviation', pkg: 'Standard', cert: true, pay: false },
-              ].map((b, i) => (
-                <tr key={i}>
+              {pendingBusinesses.map((b) => (
+                <tr key={b.id}>
                   <td className="px-6 py-4">
-                    <p className="font-bold">{b.name}</p>
-                    <p className="text-xs text-gray-500">Maun, North-West</p>
+                    <p className="font-bold">{b.business_name}</p>
+                    <p className="text-xs text-gray-500">{b.location_place}, {b.location_district}</p>
                   </td>
                   <td className="px-6 py-4">
-                    <span className="bg-purple-100 text-purple-600 px-2 py-1 rounded-md text-xs font-bold">{b.pkg}</span>
+                    <span className="bg-purple-100 text-purple-600 px-2 py-1 rounded-md text-xs font-bold capitalize">{b.package_type}</span>
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex gap-2">
-                      <button className="text-xs font-bold text-blue-500 hover:underline">Certificate</button>
-                      <button className="text-xs font-bold text-blue-500 hover:underline">Payment Proof</button>
+                      {b.certificate_url && (
+                        <a href={b.certificate_url} target="_blank" rel="noreferrer" className="text-xs font-bold text-blue-500 hover:underline">Certificate</a>
+                      )}
+                      {b.payment_proof_url && (
+                        <a href={b.payment_proof_url} target="_blank" rel="noreferrer" className="text-xs font-bold text-blue-500 hover:underline">Payment Proof</a>
+                      )}
                     </div>
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex gap-2">
-                      <button className="bg-green-500 text-white px-3 py-1 rounded-lg text-xs font-bold hover:bg-green-600 transition-all">Approve</button>
                       <button 
-                        onClick={() => setRejectionModal({ isOpen: true, businessId: b.name })}
+                        onClick={() => handleApprove(b.id)}
+                        className="bg-green-500 text-white px-3 py-1 rounded-lg text-xs font-bold hover:bg-green-600 transition-all"
+                      >
+                        Approve
+                      </button>
+                      <button 
+                        onClick={() => setRejectionModal({ isOpen: true, businessId: b.id })}
                         className="bg-red-500 text-white px-3 py-1 rounded-lg text-xs font-bold hover:bg-red-600 transition-all"
                       >
                         Reject
@@ -792,6 +1061,11 @@ const AdminDashboard = () => {
                   </td>
                 </tr>
               ))}
+              {pendingBusinesses.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-6 py-10 text-center text-gray-500">No pending applications found.</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -803,12 +1077,104 @@ const AdminDashboard = () => {
 // --- Business Dashboard ---
 const BusinessDashboard = () => {
   const [activeTab, setActiveTab] = useState<'overview' | 'profile' | 'upgrade'>('overview');
+  const [business, setBusiness] = useState<Business | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [analytics, setAnalytics] = useState<any>(null);
+
+  useEffect(() => {
+    fetchBusinessData();
+  }, []);
+
+  const fetchBusinessData = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data: businesses } = await supabase
+        .from('businesses')
+        .select('*, business_media(*)')
+        .eq('user_id', user.id);
+      
+      if (businesses && businesses.length > 0) {
+        setBusiness(businesses[0]);
+      }
+    } catch (error) {
+      console.error('Error fetching business:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!business) return;
+    setLoading(true);
+    try {
+      await supabaseService.updateBusiness(business.id, {
+        description: business.description,
+        price_range: business.price_range
+      });
+      alert('Profile updated successfully');
+    } catch (error) {
+      alert('Failed to update profile');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddMedia = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!business || !e.target.files?.[0]) return;
+    const file = e.target.files[0];
+    setLoading(true);
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${business.user_id}/media_${Math.random()}.${fileExt}`;
+      const url = await supabaseService.uploadFile('business-media', fileName, file);
+      
+      const { data: media } = await supabase
+        .from('business_media')
+        .insert([{
+          business_id: business.id,
+          media_url: url,
+          media_type: file.type.startsWith('video') ? 'video' : 'photo'
+        }])
+        .select()
+        .single();
+      
+      if (media) {
+        setBusiness(prev => prev ? {
+          ...prev,
+          business_media: [...(prev.business_media || []), media]
+        } : null);
+      }
+    } catch (error) {
+      alert('Failed to upload media');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteMedia = async (id: string) => {
+    if (!business) return;
+    try {
+      await supabase.from('business_media').delete().eq('id', id);
+      setBusiness(prev => prev ? {
+        ...prev,
+        business_media: prev.business_media?.filter(m => m.id !== id)
+      } : null);
+    } catch (error) {
+      alert('Failed to delete media');
+    }
+  };
+
+  if (loading) return <div className="p-20 text-center">Loading dashboard...</div>;
+  if (!business) return <div className="p-20 text-center">No business profile found.</div>;
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-10 space-y-10">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold">Safari Lodge Dashboard</h1>
+          <h1 className="text-3xl font-bold">{business.business_name} Dashboard</h1>
           <p className="text-gray-500">Welcome back, manage your business profile</p>
         </div>
         <div className="flex p-1 bg-gray-100 rounded-xl">
@@ -889,39 +1255,71 @@ const BusinessDashboard = () => {
       {activeTab === 'profile' && (
         <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-gray-100 max-w-2xl">
           <h3 className="text-2xl font-bold mb-8">Edit Business Profile</h3>
-          <form className="space-y-6">
+          <form onSubmit={handleUpdateProfile} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-semibold mb-2">Business Name</label>
-                <input type="text" defaultValue="Safari Lodge" className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" />
+                <input 
+                  type="text" 
+                  disabled
+                  value={business.business_name} 
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none bg-gray-50" 
+                />
               </div>
               <div>
                 <label className="block text-sm font-semibold mb-2">Price Range</label>
-                <input type="text" defaultValue="P1500 - P3000" className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" />
+                <input 
+                  type="text" 
+                  value={business.price_range || ''} 
+                  onChange={(e) => setBusiness({...business, price_range: e.target.value})}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" 
+                  placeholder="e.g. P1500 - P3000"
+                />
               </div>
             </div>
             <div>
               <label className="block text-sm font-semibold mb-2">Description</label>
-              <textarea className="w-full h-32 p-4 rounded-xl border border-gray-200 outline-none" defaultValue="Experience luxury in the heart of Botswana..." />
+              <textarea 
+                className="w-full h-32 p-4 rounded-xl border border-gray-200 outline-none" 
+                value={business.description || ''}
+                onChange={(e) => setBusiness({...business, description: e.target.value})}
+                placeholder="Tell tourists about your business..."
+              />
             </div>
             <div>
               <label className="block text-sm font-semibold mb-2">Media Gallery</label>
               <div className="grid grid-cols-4 gap-4">
-                {[1, 2, 3].map(i => (
-                  <div key={i} className="aspect-square bg-gray-100 rounded-xl flex items-center justify-center relative group">
-                    <img src={`https://picsum.photos/seed/lodge${i}/200/200`} className="w-full h-full object-cover rounded-xl" />
-                    <button className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
+                {business.business_media?.map(m => (
+                  <div key={m.id} className="aspect-square bg-gray-100 rounded-xl flex items-center justify-center relative group">
+                    {m.media_type === 'photo' ? (
+                      <img src={m.media_url} className="w-full h-full object-cover rounded-xl" />
+                    ) : (
+                      <div className="w-full h-full bg-black rounded-xl flex items-center justify-center">
+                        <Camera className="text-white w-6 h-6" />
+                      </div>
+                    )}
+                    <button 
+                      type="button"
+                      onClick={() => handleDeleteMedia(m.id)}
+                      className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
                       <X className="w-3 h-3" />
                     </button>
                   </div>
                 ))}
-                <button className="aspect-square border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center text-gray-400 hover:border-black hover:text-black transition-all">
+                <label className="aspect-square border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center text-gray-400 hover:border-black hover:text-black transition-all cursor-pointer">
+                  <input type="file" className="hidden" onChange={handleAddMedia} accept="image/*,video/*" />
                   <Plus className="w-6 h-6" />
                   <span className="text-[10px] font-bold mt-1">Add</span>
-                </button>
+                </label>
               </div>
             </div>
-            <button className="w-full bg-black text-white py-4 rounded-xl font-bold">Save Changes</button>
+            <button 
+              disabled={loading}
+              className="w-full bg-black text-white py-4 rounded-xl font-bold disabled:opacity-50"
+            >
+              {loading ? 'Saving...' : 'Save Changes'}
+            </button>
           </form>
         </div>
       )}
@@ -970,8 +1368,58 @@ const BusinessDashboard = () => {
 };
 
 // --- Business Profile Detail ---
-const BusinessProfile = ({ business, onBack }: { business: Business, onBack: () => void }) => {
+const BusinessProfile = ({ business, user, onBack }: { business: Business, user: UserProfile | null, onBack: () => void }) => {
   const [isBookmarked, setIsBookmarked] = useState(false);
+
+  useEffect(() => {
+    checkBookmark();
+    logView();
+  }, []);
+
+  const checkBookmark = async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from('bookmarks')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('business_id', business.id)
+      .single();
+    if (data) setIsBookmarked(true);
+  };
+
+  const logView = async () => {
+    if (!user) return;
+    await supabaseService.logActivity({
+      business_id: business.id,
+      activity_type: 'view',
+      visitor_continent: user.continent || 'Unknown',
+      visitor_country: user.country_code
+    });
+  };
+
+  const handleBookmark = async () => {
+    if (!user) return alert('Please login to bookmark businesses');
+    const bookmarked = await supabaseService.toggleBookmark(user.id, business.id);
+    setIsBookmarked(bookmarked);
+    if (bookmarked) {
+      await supabaseService.logActivity({
+        business_id: business.id,
+        activity_type: 'bookmark',
+        visitor_continent: user.continent || 'Unknown',
+        visitor_country: user.country_code
+      });
+    }
+  };
+
+  const handleContact = async (type: 'whatsapp' | 'call' | 'email') => {
+    if (!user) return;
+    await supabaseService.logActivity({
+      business_id: business.id,
+      activity_type: `contact_${type}`,
+      visitor_continent: user.continent || 'Unknown',
+      visitor_country: user.country_code
+    });
+  };
 
   return (
     <motion.div 
@@ -986,7 +1434,7 @@ const BusinessProfile = ({ business, onBack }: { business: Business, onBack: () 
             <X className="w-6 h-6" />
           </button>
           <button 
-            onClick={() => setIsBookmarked(!isBookmarked)}
+            onClick={handleBookmark}
             className={cn(
               "p-2 rounded-full backdrop-blur-md transition-all",
               isBookmarked ? "bg-red-500 text-white" : "bg-white/20 text-white hover:bg-white/40"
@@ -1018,15 +1466,29 @@ const BusinessProfile = ({ business, onBack }: { business: Business, onBack: () 
           </div>
 
           <div className="grid grid-cols-3 gap-4 mb-8">
-            <a href={`https://wa.me/${business.phone_whatsapp}`} target="_blank" rel="noreferrer" className="flex flex-col items-center gap-2 p-4 bg-green-50 rounded-2xl text-green-600 hover:bg-green-100 transition-all">
+            <a 
+              href={`https://wa.me/${business.phone_whatsapp}`} 
+              target="_blank" 
+              rel="noreferrer" 
+              onClick={() => handleContact('whatsapp')}
+              className="flex flex-col items-center gap-2 p-4 bg-green-50 rounded-2xl text-green-600 hover:bg-green-100 transition-all"
+            >
               <Phone className="w-6 h-6" />
               <span className="text-xs font-bold">WhatsApp</span>
             </a>
-            <a href={`tel:${business.phone_office}`} className="flex flex-col items-center gap-2 p-4 bg-blue-50 rounded-2xl text-blue-600 hover:bg-blue-100 transition-all">
+            <a 
+              href={`tel:${business.phone_office}`} 
+              onClick={() => handleContact('call')}
+              className="flex flex-col items-center gap-2 p-4 bg-blue-50 rounded-2xl text-blue-600 hover:bg-blue-100 transition-all"
+            >
               <Phone className="w-6 h-6" />
               <span className="text-xs font-bold">Call</span>
             </a>
-            <a href={`mailto:${business.email}`} className="flex flex-col items-center gap-2 p-4 bg-gray-50 rounded-2xl text-gray-600 hover:bg-gray-100 transition-all">
+            <a 
+              href={`mailto:${business.email}`} 
+              onClick={() => handleContact('email')}
+              className="flex flex-col items-center gap-2 p-4 bg-gray-50 rounded-2xl text-gray-600 hover:bg-gray-100 transition-all"
+            >
               <Mail className="w-6 h-6" />
               <span className="text-xs font-bold">Email</span>
             </a>
@@ -1068,53 +1530,35 @@ const BusinessProfile = ({ business, onBack }: { business: Business, onBack: () 
 };
 
 // --- Tourist PWA ---
-const TouristPWA = () => {
+const TouristPWA = ({ user }: { user: UserProfile | null }) => {
   const [search, setSearch] = useState('');
   const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null);
+  const [businesses, setBusinesses] = useState<Business[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const mockBusinesses: Business[] = [
-    {
-      id: '1',
-      user_id: 'u1',
-      business_name: 'Mowana Safari Lodge',
-      category: 'Lodge',
-      description: 'Experience luxury in the heart of Chobe. Our lodge offers world-class amenities and breathtaking river views.',
-      location_district: 'Chobe District',
-      location_place: 'Kasane',
-      phone_whatsapp: '+26771234567',
-      phone_office: '+2676250111',
-      email: 'info@mowana.com',
-      status: 'approved',
-      package_type: 'premium',
-      price_range: 'P2500 - P5000',
-      image_url: 'https://picsum.photos/seed/lodge1/800/600'
-    },
-    {
-      id: '2',
-      user_id: 'u2',
-      business_name: 'Desert & Delta Safaris',
-      category: 'Safari Operator',
-      description: 'Specializing in bespoke safari experiences across Botswana. From the Delta to the desert.',
-      location_district: 'North-West District',
-      location_place: 'Maun',
-      phone_whatsapp: '+26772345678',
-      phone_office: '+2676861234',
-      email: 'bookings@desertdelta.com',
-      status: 'approved',
-      package_type: 'standard',
-      price_range: 'P3500 - P8000',
-      image_url: 'https://picsum.photos/seed/safari1/800/600'
+  useEffect(() => {
+    fetchBusinesses();
+  }, []);
+
+  const fetchBusinesses = async () => {
+    try {
+      const data = await supabaseService.getBusinesses({ status: 'approved' });
+      setBusinesses(data);
+    } catch (error) {
+      console.error('Error fetching businesses:', error);
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
-  const filteredBusinesses = mockBusinesses.filter(b => 
+  const filteredBusinesses = businesses.filter(b => 
     b.business_name.toLowerCase().includes(search.toLowerCase()) ||
     b.category.toLowerCase().includes(search.toLowerCase()) ||
     b.location_place.toLowerCase().includes(search.toLowerCase())
   );
 
   if (selectedBusiness) {
-    return <BusinessProfile business={selectedBusiness} onBack={() => setSelectedBusiness(null)} />;
+    return <BusinessProfile business={selectedBusiness} user={user} onBack={() => setSelectedBusiness(null)} />;
   }
   
   return (
@@ -1122,10 +1566,12 @@ const TouristPWA = () => {
       {/* Search Header */}
       <div className="bg-white p-6 sticky top-0 z-10 shadow-sm">
         <div className="flex items-center gap-4 mb-4">
-          <div className="w-10 h-10 bg-black rounded-full flex items-center justify-center text-white font-bold">JD</div>
+          <div className="w-10 h-10 bg-black rounded-full flex items-center justify-center text-white font-bold">
+            {user?.full_name.split(' ').map(n => n[0]).join('')}
+          </div>
           <div>
             <p className="text-xs text-gray-500">Welcome to Botswana,</p>
-            <p className="font-bold">John Doe</p>
+            <p className="font-bold">{user?.full_name}</p>
           </div>
         </div>
         <div className="relative">
@@ -1210,15 +1656,51 @@ const TouristPWA = () => {
 
 // --- Main App ---
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const handleLogin = (role: UserRole) => {
-    setUser({ id: '1', name: 'Demo User', email: 'demo@bth.com', role });
-  };
+  useEffect(() => {
+    // Check session
+    const checkSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const profile = await supabaseService.getProfile(session.user.id);
+          setUser(profile);
+        }
+      } catch (error) {
+        console.error('Session error:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  const handleLogout = () => {
+    checkSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        const profile = await supabaseService.getProfile(session.user.id);
+        setUser(profile);
+      } else {
+        setUser(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleLogout = async () => {
+    await supabaseService.signOut();
     setUser(null);
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-12 h-12 border-4 border-black border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
 
   return (
     <Router>
@@ -1227,7 +1709,7 @@ export default function App() {
         
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/login" element={<Login onLogin={handleLogin} />} />
+          <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           
           {/* Protected Routes */}
@@ -1241,7 +1723,7 @@ export default function App() {
           />
           <Route 
             path="/pwa" 
-            element={user?.role === 'tourist' ? <TouristPWA /> : <Navigate to="/login" />} 
+            element={user?.role === 'tourist' ? <TouristPWA user={user} /> : <Navigate to="/login" />} 
           />
           
           <Route path="*" element={<Navigate to="/" />} />
