@@ -1,25 +1,18 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
 
-let client: SupabaseClient | null = null;
-
-if (supabaseUrl && supabaseKey) {
-  client = createClient(supabaseUrl, supabaseKey);
+if (!supabaseUrl || !supabaseKey) {
+  console.warn(
+    'Supabase environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY) are missing. ' +
+    'Please add them to your environment secrets.'
+  );
 }
 
-export const isSupabaseConfigured = !!client;
+export const supabase = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseKey || 'placeholder-key'
+);
 
-// Proxy to handle missing environment variables gracefully
-export const supabase = new Proxy({} as SupabaseClient, {
-  get(_, prop) {
-    if (!client) {
-      throw new Error(
-        'Supabase environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY) are missing. ' +
-        'Please add them to your environment secrets.'
-      );
-    }
-    return (client as any)[prop];
-  }
-});
+export const isSupabaseConfigured = !!(supabaseUrl && supabaseKey);
