@@ -485,7 +485,12 @@ const Signup = () => {
 
       setIsSuccess(true);
     } catch (err: any) {
-      setError(err.message || 'Onboarding failed');
+      console.error('Business signup error:', err);
+      if (err.message === 'Failed to fetch') {
+        setError('Connection failed. This often happens if your Supabase project is paused, the storage buckets are not created, or your network is blocking the request. Please ensure you have created "business-docs" and "payments" buckets in your Supabase storage.');
+      } else {
+        setError(err.message || 'Onboarding failed');
+      }
     } finally {
       setLoading(false);
     }
