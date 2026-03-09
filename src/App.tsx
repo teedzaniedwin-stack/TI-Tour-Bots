@@ -443,51 +443,72 @@ const Signup = () => {
       }
 
       // 1. Create Auth User & Profile
-      const user = await supabaseService.signUp(
-        formData.email,
-        formData.password,
-        formData.fullName,
-        'business'
-      );
+      let user;
+      try {
+        user = await supabaseService.signUp(
+          formData.email,
+          formData.password,
+          formData.fullName,
+          'business'
+        );
+      } catch (err: any) {
+        console.error('Auth signup failed:', err);
+        throw new Error(`Step 1 (Account Creation) failed: ${err.message}`);
+      }
 
       // 2. Upload Certificate
       let certUrl = '';
       if (files.cert) {
-        const fileExt = files.cert.name.split('.').pop();
-        const fileName = `${user.id}/certificate_${Math.random()}.${fileExt}`;
-        certUrl = await supabaseService.uploadFile('business-docs', fileName, files.cert);
+        try {
+          const fileExt = files.cert.name.split('.').pop();
+          const fileName = `${user.id}/certificate_${Math.random()}.${fileExt}`;
+          certUrl = await supabaseService.uploadFile('business-docs', fileName, files.cert);
+        } catch (err: any) {
+          console.error('Certificate upload failed:', err);
+          throw new Error(`Step 2 (Certificate Upload) failed: ${err.message}. Ensure the "business-docs" bucket exists and has public upload policies.`);
+        }
       }
 
       // 3. Upload Payment Proof
       let paymentUrl = '';
       if (files.payment) {
-        const fileExt = files.payment.name.split('.').pop();
-        const fileName = `${user.id}/payment_${Math.random()}.${fileExt}`;
-        paymentUrl = await supabaseService.uploadFile('payments', fileName, files.payment);
+        try {
+          const fileExt = files.payment.name.split('.').pop();
+          const fileName = `${user.id}/payment_${Math.random()}.${fileExt}`;
+          paymentUrl = await supabaseService.uploadFile('payments', fileName, files.payment);
+        } catch (err: any) {
+          console.error('Payment upload failed:', err);
+          throw new Error(`Step 3 (Payment Upload) failed: ${err.message}. Ensure the "payments" bucket exists and has public upload policies.`);
+        }
       }
 
       // 4. Create Business Record
-      await supabaseService.createBusiness({
-        user_id: user.id,
-        business_name: formData.businessName,
-        category: formData.category,
-        email: formData.email,
-        phone_whatsapp: formData.whatsapp,
-        phone_office: formData.office,
-        website: formData.website,
-        location_district: formData.district,
-        location_place: formData.place,
-        package_type: selectedPackage as PackageType,
-        certificate_url: certUrl,
-        payment_proof_url: paymentUrl,
-        status: 'pending'
-      });
+      try {
+        await supabaseService.createBusiness({
+          user_id: user.id,
+          business_name: formData.businessName,
+          category: formData.category,
+          email: formData.email,
+          phone_whatsapp: formData.whatsapp,
+          phone_office: formData.office,
+          website: formData.website,
+          location_district: formData.district,
+          location_place: formData.place,
+          package_type: selectedPackage as PackageType,
+          certificate_url: certUrl,
+          payment_proof_url: paymentUrl,
+          status: 'pending'
+        });
+      } catch (err: any) {
+        console.error('Business record creation failed:', err);
+        throw new Error(`Step 4 (Business Registration) failed: ${err.message}`);
+      }
 
       setIsSuccess(true);
     } catch (err: any) {
-      console.error('Business signup error:', err);
-      if (err.message === 'Failed to fetch') {
-        setError('Connection failed. This often happens if your Supabase project is paused, the storage buckets are not created, or your network is blocking the request. Please ensure you have created "business-docs" and "payments" buckets in your Supabase storage.');
+      console.error('Full onboarding error:', err);
+      if (err.message.includes('Failed to fetch')) {
+        setError(`${err.message}. This is a network error. Please check if your Supabase project is paused or if your internet is blocking the connection to Supabase.`);
       } else {
         setError(err.message || 'Onboarding failed');
       }
