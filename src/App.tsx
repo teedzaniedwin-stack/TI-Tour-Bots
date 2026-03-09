@@ -1692,6 +1692,11 @@ export default function App() {
     // Check session
     const checkSession = async () => {
       try {
+        // Test connection
+        const { data: testData, error: testError } = await supabase.from('profiles').select('*').limit(1);
+        if (testError) console.error('Supabase connection failed:', testError);
+        else console.log('Supabase connected! Data:', testData);
+
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
         if (sessionError) throw sessionError;
 
