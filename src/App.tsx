@@ -1709,10 +1709,10 @@ export default function App() {
           </p>
           <div className="space-y-4">
             <div className="p-4 bg-gray-50 rounded-xl text-left text-sm font-mono break-all">
-              VITE_SUPABASE_URL=https://your-project.supabase.co
+              VITE_SUPABASE_URL=https://smnavvmzymbtskrtwwvf.supabase.co
             </div>
             <div className="p-4 bg-gray-50 rounded-xl text-left text-sm font-mono break-all">
-              VITE_SUPABASE_ANON_KEY=your-anon-key
+              VITE_SUPABASE_ANON_KEY=sb_publishable_REcJZIRC6yXrq2OoKGr00w_KxGBQwV6
             </div>
           </div>
         </div>
